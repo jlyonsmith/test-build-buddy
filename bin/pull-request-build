@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Build script for an iOS project pull request
+
+if [[ -z "$METRICS_DATA_FILE" ]]; then
+    METRICS_DATA_FILE=/dev/null
+fi
+
+## Configurable settings
+ROOT_NAME=RealSelf
+XCODE_WORKSPACE=${ROOT_NAME}.xcworkspace
+XCODE_TEST_SCHEME=${ROOT_NAME}
+BUILD_DIR=~/Builds/PullRequest
+XCODEBUILD=$(which xcodebuild)
+SIMULATOR_CONFIG="platform=iOS Simulator,name=iPhone 6,OS=latest"
+ISO_TIME="ruby -e \"require 'time'; puts ARGV[0] + ': ' + Time.now.utc.iso8601\""
+
+## Install Gemfile
+echo Pulling Gemfile
+if ! bundle install; then
+    exit 1
+fi
+
+## Install Cocoapods
+echo Update Pods
+if ! bundle exec pod repo update; then
+    exit 1
+fi
+
+echo Pulling Cocopods
+if ! bundle exec pod install; then
+    exit 1
+fi
+
+## Check to make sure no spaces in file and directory names
+set -o pipefail && find RealSelf RealSelfTests -not -path \*Images.xcassets\* | egrep '\&| '
+if [[ $? -eq 0 ]]; then
+  echo 'ERROR: RealSelf and RealSelfTests files and directories cannot have spaces or ampersands in them'
+  exit 1
+fi
+
+## Check for localization issues
+if ! bundle exec ./bin/check-localization ./RealSelf --yaml localization.yaml; then
+  echo ERROR: Localization check failed
+  exit 1
+else
+  cat localization.yaml >> $METRICS_DATA_FILE
+fi
+
+## Copy in the default configuration
+cp RealSelf/Helpers/RSConfig-Test.swift RealSelf/Helpers/RSConfig.swift
+
+## Cleanup
+function cleanup {
+  STOP_SCRIPT=bin/stop-mock-servers
+  # Stop script might not exist if repo was not sync'd
+  if [[ -f "$STOP_SCRIPT" ]]; then
+    bundle exec $STOP_SCRIPT
+  fi
+  killall "Simulator" 2>/dev/null
+}
+trap cleanup EXIT
+cleanup
+
+## Test
+# Turn off the simulator hardware keyboard
+bundle exec setsimkbd off
+
+# Run all unit and UI tests and throw away the output so we can see which tests failed
+bundle exec ./bin/run-mock-servers data --nowait 2> /dev/null
+
+echo Running Tests
+TEST_BUILD_START=$(eval $ISO_TIME 'test_build_start')
+set -o pipefail && $XCODEBUILD test -workspace "${XCODE_WORKSPACE}" -scheme "$XCODE_TEST_SCHEME" -sdk iphonesimulator -destination "$SIMULATOR_CONFIG" -destination-timeout 30 -derivedDataPath DerivedData/ | bundle exec xcpretty
+if [[ $? -ne 0 ]]; then
+ echo ERROR: Tests on \"$SIMULATOR_CONFIG\" failed
+ exit 1
+fi
+echo '---' >> "$METRICS_DATA_FILE"
+echo $TEST_BUILD_START >> "$METRICS_DATA_FILE"
+eval $ISO_TIME 'test_build_end' >> "$METRICS_DATA_FILE"
+
+exit 0

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Build script for a branch build
+
+set
+exit 0
