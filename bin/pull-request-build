@@ -2,5 +2,5 @@
 # Build script for a pull request
 
 set
-sleep 12
+sleep 17
 exit 0
