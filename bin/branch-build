@@ -2,5 +2,6 @@
 
 echo Branch Build Running
 set | grep BB_
+echo "version: v1.0.0-20161221.0" >> $BB_METRICS_DATA_FILE
 sleep 1
 echo Branch Build Complete
